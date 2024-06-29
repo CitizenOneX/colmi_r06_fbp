@@ -1,0 +1,19 @@
+name: colmi_r6_fbp
+description: "Reads data from COLMi R6 Smart Ring using flutter_blue_plus"
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.4.3 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
