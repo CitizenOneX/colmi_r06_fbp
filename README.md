@@ -1,3 +1,8 @@
-# colmi_r6_fbp
+# colmi_r06_fbp
 
-Reads data from COLMi R6 Smart Ring using flutter_blue_plus
+Reads and writes data to and from COLMi R02-R06 Smart Rings using flutter_blue_plus.
+
+(Built for Android and iOS but only Android has been tested.)
+
+### Screenshot
+![Screenshot](docs/Screenshot.jpg)

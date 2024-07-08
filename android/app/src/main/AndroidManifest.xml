@@ -16,7 +16,7 @@
     <!-- legacy for Android 9 or lower -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
     <application
-        android:label="colmi_r6_fbp"
+        android:label="colmi_r06_fbp"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
