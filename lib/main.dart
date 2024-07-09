@@ -46,6 +46,7 @@ class _HomePageState extends State<HomePage> {
   int _prevReceivedTime = DateTime.now().millisecondsSinceEpoch;
   String? _error;
   bool _rawDataOn = false;
+  bool _pollRawDataOn = false;
   Timer? _rawDataTimer;
   bool _waveGestureOn = false;
 
@@ -54,14 +55,17 @@ class _HomePageState extends State<HomePage> {
   int? _steps;
   int? _calories;
   int? _distance;
-  int? _blood;
-  int? _bloodMax1;
-  int? _bloodMax2;
-  int? _bloodMax3;
-  int? _hrRaw;
-  int? _hrMax;
-  int? _hrMin;
-  int? _hrDiff;
+  int? _heartRate;
+  int? _spO2Percentage;
+  int? _stress;
+  int? _spO2raw;
+  int? _spO2a;
+  int? _spO2b;
+  int? _spO2c;
+  int? _ppgRaw;
+  int? _ppgMax;
+  int? _ppgMin;
+  int? _ppgDiff;
   int? _rawX;
   int? _rawY;
   int? _rawZ;
@@ -180,7 +184,7 @@ class _HomePageState extends State<HomePage> {
     if (kDebugMode) debugPrint('_onNotificationData called: $data');
 
     // track the time between accelerometer updates
-    if (data[0] == ring.Notification.rawSensor.code && data[1] == ring.NotificationRawSensor.accelerometer.code) {
+    if (data[0] == ring.Notification.rawSensor.code && data[1] == ring.RawSensorSubtype.accelerometer.code) {
       var receivedTime = DateTime.now().millisecondsSinceEpoch;
       _accelMillis = receivedTime - _prevReceivedTime;
       _prevReceivedTime = receivedTime;
@@ -202,17 +206,17 @@ class _HomePageState extends State<HomePage> {
       _batteryLevel = level;
       _batteryIsCharging = isCharging;
     }
-    else if (data[0] == ring.Notification.notification.code) {
+    else if (data[0] == ring.Notification.general.code) {
       if (kDebugMode) debugPrint('Notification message');
 
       // check second byte and dispatch to specific parsing function
-      if (data[1] == ring.NotificationSubtype.stepsCaloriesDistance.code) {
+      if (data[1] == ring.GeneralSubtype.stepsCaloriesDistance.code) {
           var (steps, calories, distance) = ring.parseNotifStepsCaloriesDistanceData(data);
           _steps = steps;
           _calories = calories;
           _distance = distance;
       }
-      else if (data[1] == ring.NotificationSubtype.battery.code) {
+      else if (data[1] == ring.GeneralSubtype.battery.code) {
           var (level, isCharging) = ring.parseNotifBatteryData(data);
           _batteryLevel = level;
           _batteryIsCharging = isCharging;
@@ -224,7 +228,7 @@ class _HomePageState extends State<HomePage> {
     }
     else if (data[0] == ring.Notification.rawSensor.code) {
       // check second byte and dispatch to specific parsing function
-      if (data[1] == ring.NotificationRawSensor.accelerometer.code) {
+      if (data[1] == ring.RawSensorSubtype.accelerometer.code) {
           var (rawX, rawY, rawZ) = ring.parseRawAccelerometerSensorData(data);
           _rawX = rawX;
           _rawY = rawY;
@@ -238,26 +242,40 @@ class _HomePageState extends State<HomePage> {
           // range > 0, in g (squared, actually)
           _impact = ((rawX * rawX + rawY * rawY + rawZ * rawZ)/(512*512) - 1.0).abs();
       }
-      else if (data[1] == ring.NotificationRawSensor.blood.code) {
-        var (blood, max1, max2, max3) = ring.parseRawBloodSensorData(data);
-          _blood = blood;
-          _bloodMax1 = max1;
-          _bloodMax2 = max2;
-          _bloodMax3 = max3;
+      else if (data[1] == ring.RawSensorSubtype.spO2.code) {
+        var (raw, a, b, c) = ring.parseRawSpO2SensorData(data);
+          _spO2raw = raw;
+          _spO2a = a;
+          _spO2b = b;
+          _spO2c = c;
       }
-      else if (data[1] == ring.NotificationRawSensor.heartrate.code) {
-        var (raw, max, min, diff) = ring.parseRawHeartRateSensorData(data);
-          _hrRaw = raw;
-          _hrMax = max;
-          _hrMin = min;
-          _hrDiff = diff;
+      else if (data[1] == ring.RawSensorSubtype.ppg.code) {
+        var (raw, max, min, diff) = ring.parseRawPpgSensorData(data);
+          _ppgRaw = raw;
+          _ppgMax = max;
+          _ppgMin = min;
+          _ppgDiff = diff;
       }
       else {
           debugPrint('Unknown Raw Sensor subtype: ${data[1]}');
       }
     }
-    else if (data[0] == ring.Notification.heartRate.code) {
-      debugPrint('Heart Rate message');
+    else if (data[0] == ring.Notification.heartSpo2Stress.code) {
+      if (data[1] == ring.HeartSpO2StressSubtype.heartRate.code) {
+        debugPrint('Heart Rate message');
+        if (data[3] != 0) _heartRate = data[3];
+      }
+      else if (data[1] == ring.HeartSpO2StressSubtype.spO2.code) {
+        debugPrint('SpO2 message');
+        if (data[3] != 0) _spO2Percentage = data[3];
+      }
+      else if (data[1] == ring.HeartSpO2StressSubtype.stress.code) {
+        debugPrint('Stress message');
+        if (data[3] != 0) _stress = data[3];
+      }
+      else {
+        debugPrint('Unknown Heart Rate/SpO2/Stress subtype');
+      }
     }
     else if (data[0] == ring.Notification.waveGesture.code) {
       debugPrint('Wave Gesture message');
@@ -267,6 +285,9 @@ class _HomePageState extends State<HomePage> {
     }
     else if (data[0] == ring.Notification.blinkTwice.code) {
       debugPrint('Blink Twice message');
+    }
+    else if (data[0] == ring.Notification.greenLight10Sec.code) {
+      debugPrint('Green Light 10s message');
     }
     else {
       debugPrint('Unknown message type: ${data[0]}');
@@ -278,16 +299,18 @@ class _HomePageState extends State<HomePage> {
     setState(() {});
   }
 
-  /// Polls the ring periodically for a snapshot of HR, SPO2 and Accelerometer data
-  /// Originally used the "a10404" subscription but it only provides updates about once per second
-  /// So this implementation periodically polls "a103" while the _rawDataOn flag is toggled on.
+  /// Polls the ring periodically for a snapshot of SpO2, PPG and Accelerometer data
+  /// Originally used the 0xa104 subscription but it only provides updates about once per second
+  /// So this implementation periodically polls "a103" while the _pollRawDataOn flag is toggled on.
+  /// NOTE: the LEDs don't flash and the SpO2 and PPG data doesn't change over time which suggests
+  /// that only the accelerometer data is being polled, as opposed to the 0xa104 subscription
   /// TODO it would be nice to be able to turn on the raw data selectively, for e.g. HR or accelerometer etc
   /// TODO it would also be nice to be able to get "MAX" accelerometer values over a given period
   /// or since the last request, to help with tap detection
-  Future<void> _toggleAllRawData() async {
-    if (!_rawDataOn) {
+  Future<void> _pollAllRawData() async {
+    if (!_pollRawDataOn) {
       _rawDataTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) {
-        if (_rawDataOn) {
+        if (_pollRawDataOn) {
           _sendCommand(ring.Command.getAllRawData.bytes);
         }
       });
@@ -296,11 +319,17 @@ class _HomePageState extends State<HomePage> {
       _rawDataTimer?.cancel();
       _rawDataTimer = null;
     }
+    _pollRawDataOn = !_pollRawDataOn;
+  }
+
+  /// Uses the 0xa104 subscription that provides updates about once per second
+  Future<void> _toggleAllRawData() async {
+    await _sendCommand(_rawDataOn ? ring.Command.disableAllRawData.bytes : ring.Command.enableAllRawData.bytes);
     _rawDataOn = !_rawDataOn;
   }
 
   Future<void> _toggleWaveGesture() async {
-    await _sendCommand(_waveGestureOn ? ring.Command.waveGestureOff.bytes : ring.Command.waveGestureOn.bytes);
+    await _sendCommand(_waveGestureOn ? ring.Command.disableWaveGesture.bytes : ring.Command.enableWaveGesture.bytes);
     _waveGestureOn = !_waveGestureOn;
   }
 
@@ -312,27 +341,33 @@ class _HomePageState extends State<HomePage> {
     await _sendCommand(ring.Command.getAllRawData.bytes);
   }
 
-  Future<void> _allRawDataOff() async {
-    await _sendCommand(ring.Command.allRawDataOff.bytes);
-  }
-
   Future<void> _reboot() async {
     await _sendCommand(ring.Command.reboot.bytes);
   }
 
-  Future<void> _resetDefault() async {
-    await _sendCommand(ring.Command.resetDefault.bytes);
+  Future<void> _resetDefaults() async {
+    await _sendCommand(ring.Command.resetDefaults.bytes);
   }
 
   Future<void> _blinkTwice() async {
     await _sendCommand(ring.Command.blinkTwice.bytes);
   }
 
-  /// kicks off the measurement start, then (if the ring is being worn) it seems like you wait about 20 seconds
+  Future<void> _greenLight() async {
+    await _sendCommand(ring.Command.greenLight10Sec.bytes);
+  }
+
+  /// kicks off the measurement start, then (if the ring is being worn) you wait about 25 seconds
   /// then get 10 notification callbacks (looks like 5 pairs - duplicates with the same data) in rapid succession
   /// If the ring is not being worn you get a message back after about 1 second instead
   Future<void> _measureHeartRate() async {
     await _sendCommand(ring.Command.requestHeartRate.bytes);
+  }
+  Future<void> _measureSpO2() async {
+    await _sendCommand(ring.Command.requestSpO2.bytes);
+  }
+  Future<void> _measureStress() async {
+    await _sendCommand(ring.Command.requestStress.bytes);
   }
 
   /// Actually send the 16-byte command message to the custom Write characteristic
@@ -384,7 +419,7 @@ class _HomePageState extends State<HomePage> {
             const Divider(),
 
             // put it in a SizedBox to control vertical number of elements
-            SizedBox(height: 140,
+            SizedBox(height: 60,
               child: Wrap(direction: Axis.vertical, runSpacing: 30.0, children: [
                 Text('Battery Level: ${_batteryLevel != null ? '$_batteryLevel%' : ''}',),
                 const SizedBox(height: 10),
@@ -396,22 +431,20 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 10),
                 Text('Distance: ${_distance ?? ''}',),
                 const SizedBox(height: 10),
-                Text('Blood: ${_blood ?? ''}',),
+                Text('Heart Rate: ${_heartRate ?? ''}',),
                 const SizedBox(height: 10),
-                Text('BloodMax1: ${_bloodMax1 ?? ''}',),
+                Text('SpO2: ${_spO2Percentage != null ? '$_spO2Percentage%' : ''}',),
                 const SizedBox(height: 10),
-                Text('BloodMax2: ${_bloodMax2 ?? ''}',),
+                Text('Stress: ${_stress ?? ''}',),
                 const SizedBox(height: 10),
-                Text('BloodMax3: ${_bloodMax3 ?? ''}',),
-                const SizedBox(height: 10),
-                Text('HR Raw: ${_hrRaw ?? ''}',),
-                const SizedBox(height: 10),
-                Text('HR Max: ${_hrMax ?? ''}',),
-                const SizedBox(height: 10),
-                Text('HR Min: ${_hrMin ?? ''}',),
-                const SizedBox(height: 10),
-                Text('HR Diff: ${_hrDiff ?? ''}',),
-                const SizedBox(height: 10),
+              ])),
+              const Divider(),
+
+              // SpO2, PPG raw data
+              SizedBox(height: 20,
+              child: Wrap(direction: Axis.vertical, runSpacing: 30.0, children: [
+                Text('SpO2 Raw: [${_spO2raw ?? ''}, ${_spO2a ?? ''}, ${_spO2b ?? ''}, ${_spO2c ?? ''}]',),
+                Text('PPG Raw: [${_ppgRaw ?? ''}, ${_ppgMax ?? ''}, ${_ppgMin ?? ''}, ${_ppgDiff ?? ''}]',),
               ])),
               const Divider(),
 
@@ -450,6 +483,10 @@ class _HomePageState extends State<HomePage> {
                   child: const Text("Toggle Raw Data Stream"),
                 ),
                 ElevatedButton(
+                  onPressed: _pollAllRawData,
+                  child: const Text("Toggle Poll Raw Data"),
+                ),
+                ElevatedButton(
                   onPressed: _toggleWaveGesture,
                   child: const Text("Toggle Wave Gesture Detection"),
                 ),
@@ -459,27 +496,35 @@ class _HomePageState extends State<HomePage> {
                 ),
                 ElevatedButton(
                   onPressed: _measureHeartRate,
-                  child: const Text("Start Measuring Heart Rate"),
+                  child: const Text("Measure Heart Rate"),
+                ),
+                ElevatedButton(
+                  onPressed: _measureSpO2,
+                  child: const Text("Measure SpO2"),
+                ),
+                ElevatedButton(
+                  onPressed: _measureStress,
+                  child: const Text("Measure Stress"),
                 ),
                 ElevatedButton(
                   onPressed: _getAllRawData,
                   child: const Text("Get Raw Data"),
                 ),
                 ElevatedButton(
-                  onPressed: _allRawDataOff,
-                  child: const Text("Raw Data Subscription Off"),
+                  onPressed: _blinkTwice,
+                  child: const Text("Blink Twice"),
                 ),
                 ElevatedButton(
-                  onPressed: _resetDefault,
-                  child: const Text("Reset Default"),
+                  onPressed: _greenLight,
+                  child: const Text("Green Light 10s"),
+                ),
+                ElevatedButton(
+                  onPressed: _resetDefaults,
+                  child: const Text("Reset Defaults"),
                 ),
                 ElevatedButton(
                   onPressed: _reboot,
                   child: const Text("Reboot"),
-                ),
-                ElevatedButton(
-                  onPressed: _blinkTwice,
-                  child: const Text("Blink Twice"),
                 ),
               ]),
             ],

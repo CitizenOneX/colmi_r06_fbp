@@ -23,15 +23,61 @@ enum Uuid {
   final String str128;
 }
 
+/// Commands we can send to the ring
+enum Command {
+  setDateTime (hex: '01'), // does this also getDateTime? TODO need to provide datetime bytes here
+  enableWaveGesture (hex: '0204'),
+  waitingForWaveGesture (hex: '0205'), // confirms back with 0x0200 response
+  disableWaveGesture (hex: '0206'),
+  getBatteryState (hex: '03'),
+  setPhoneName (hex: '04'), // TODO provide string length in data[3] and string data in data[4]+
+  keepAlive (hex: '39'), // ?
+  reboot (hex: '08'),
+  setUnitsMetric (hex: '0a0200'),
+  setUnitsImperial (hex: '0a0201'),
+  blinkTwice (hex: '10'),
+  syncHistoricalHeartRate (hex: '15'), // TODO set data[1-4] uint "from_time"
+  setHeartRateMonitoringInterval (hex: '160201'),
+  disableSpO2Monitoring (hex: '2c0200'),
+  enableSpO2Monitoring (hex: '2c0201'),
+  disableStressMonitoring (hex: '360200'),
+  enableStressMonitoring (hex: '360201'),
+  syncHistoricalStress (hex: '37'),
+  syncHistoricalSteps (hex: '43'), // TODO set data[1] number of prev days
+  greenLight10Sec (hex: '5055aa'),
+  requestHeartRate (hex: '6901'),
+  requestSpO2 (hex: '6903'),
+  requestStress (hex: '6908'),
+  disableAllRawData (hex: 'a102'),
+  getAllRawData (hex: 'a103'),
+  enableAllRawData (hex: 'a104'),
+  syncHistoricalSleep (hex: 'bc27'),
+  syncHistoricalSpO2 (hex: 'bc2a'),
+  resetDefaults (hex: 'ff');
+
+  const Command({required this.hex});
+
+  final String hex;
+  List<int> get bytes => hexStringToCmdBytes(hex);
+}
+
 /// 16-byte data notifications we receive back from the ring that are all parsed with custom parsers.
 /// When the function is better understood, these names can be improved
 enum Notification {
-  notification (0x73),
+  datetime (0x01),
+  waveGesture (0x02), // 0x0200 confirmation, 0x0202 wave detected
   battery (0x03),
+  phoneName (0x04),
+  unitsPreference (0x0a),
   blinkTwice (0x10),
-  rawSensor (0xa1),
-  heartRate (0x69),
-  waveGesture (0x02);
+  heartRateMonitoringInterval (0x16), // TODO 0x160201, 4th byte has interval
+  spO2MonitoringPreference (0x2c),
+  unknown (0x2f), // (Error?) got this first when doing a "set/get" datetime x01 command, then got a 0x01 message back
+  stressMonitoringPreference (0x36),
+  greenLight10Sec (0x50),  // 0x5055aa
+  heartSpo2Stress (0x69),
+  general (0x73),
+  rawSensor (0xa1);
 
   const Notification(this.code);
 
@@ -40,11 +86,11 @@ enum Notification {
 
 /// Subtype (second byte) of 16-byte '0x73' notifications we receive from the ring
 /// without making any particular subscription
-enum NotificationSubtype {
-  syncTodayHrs (0x01),
-  syncSingleBp (0x02),
-  syncTodaySpo2 (0x03),
-  syncStepDetailSingle (0x04),
+enum GeneralSubtype {
+  heartRateSyncRequired (0x01),
+  singleBpSync (0x02), // TODO better name? What does this do?
+  spO2SyncRequired (0x03),
+  singleStepDetailSync (0x04),
   temperature (0x05),
   syncTodaySport (0x06),
   sportEnded (0x07),
@@ -53,40 +99,33 @@ enum NotificationSubtype {
   bloodSugar (0x0d),
   stepsCaloriesDistance (0x12);
 
-  const NotificationSubtype(this.code);
+  const GeneralSubtype(this.code);
 
   final int code;
 }
 
 /// Subtype (second byte) of 16-byte notifications we receive from the ring
-/// after making a RawSensor subscription
-enum NotificationRawSensor {
-  blood (0x01),
-  heartrate (0x02),
+/// after making a RawSensor (0xa1) subscription
+enum RawSensorSubtype {
+  spO2 (0x01), // red led and photodetector; SpO2; oximetry; blood oxygen saturation
+  ppg (0x02), // green led and photodetector; photoplethysmography; for pulse rate
   accelerometer (0x03);
 
-  const NotificationRawSensor(this.code);
+  const RawSensorSubtype(this.code);
 
   final int code;
 }
 
-/// Commands we can send to the ring
-enum Command {
-  getBatteryState (hex: '03'),
-  requestHeartRate (hex: '690101'),
-  allRawDataOff (hex: 'a102'),
-  getAllRawData (hex: 'a103'),
-  allRawDataOn (hex: 'a10404'),
-  waveGestureOn (hex: '0204'),
-  waveGestureOff (hex: '0206'),
-  blinkTwice (hex: '10'),
-  reboot (hex: '08'),
-  resetDefault (hex: 'ff');
+/// Subtype (second byte) of 16-byte notifications we receive from the ring
+/// after making a heartSpo2Stress (0x69) request
+enum HeartSpO2StressSubtype {
+  heartRate (0x01), // then data[2]: 0x00 failed, ring not on finger, or 0x01 running? then data[3]: 0x00 running, or HR result
+  spO2 (0x03), // then data[2]: 0x00 failed, ring not on finger, or 0x01 running? then data[3]: 0x00 running, or SpO2 result
+  stress (0x08); // then data[2]: 0x00 failed, ring not on finger, or 0x01 running? then data[3]: 0x00 running, or SpO2 result
 
-  const Command({required this.hex});
+  const HeartSpO2StressSubtype(this.code);
 
-  final String hex;
-  List<int> get bytes => hexStringToCmdBytes(hex);
+  final int code;
 }
 
 /// Takes a short hex command e.g. 'A102' and packs it (with a checksum) into a well-formed 16-byte command message
@@ -103,7 +142,7 @@ List<int> hexStringToCmdBytes(final String hexString) {
 
 /// returns the battery level as a percentage and isCharging
 /// e.g. [3, 71, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 74]
-(int,bool,) parseBatteryData(List<int> data) {
+(int,bool) parseBatteryData(List<int> data) {
   assert(data.length == 16);
   assert(data[0] == 0x03);
 
@@ -112,7 +151,7 @@ List<int> hexStringToCmdBytes(final String hexString) {
 
 /// returns the battery level as a percentage and isCharging from the notification
 /// e.g. [115, 3, 70, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 188]
-(int,bool,) parseNotifBatteryData(List<int> data) {
+(int,bool) parseNotifBatteryData(List<int> data) {
   assert(data.length == 16);
   assert(data[0] == 0x73);
   assert(data[1] == 0x0c);
@@ -136,12 +175,12 @@ List<int> hexStringToCmdBytes(final String hexString) {
 
 /// Blood - raw sensor
 /// e.g. [161, 1, 0, 74, 0, 136, 0, 76, 0, 101, 1, 0, 0, 0, 0, 38]
-(int, int, int, int) parseRawBloodSensorData(List<int> data) {
+(int, int, int, int) parseRawSpO2SensorData(List<int> data) {
   assert(data.length == 16);
   assert(data[0] == 0xa1);
   assert(data[1] == 0x01);
 
-  int blood = (data[2] << 8) | data[3];
+  int blood = (data[2] << 8) | data[3]; // TODO might just be uint8 too, i.e. data[3]?
   int max1 = data[5];
   int max2 = data[7];
   int max3 = data[9];
@@ -149,9 +188,10 @@ List<int> hexStringToCmdBytes(final String hexString) {
   return (blood, max1, max2, max3);
 }
 
-/// HRS - raw sensor
+/// Photodetector - raw sensor (periodic values range from 10,000 to 13,000, heart beats measured peak to peak)
+/// But this is just a snapshot
 /// e.g. [161, 2, 50, 94, 50, 118, 49, 30, 1, 88, 1, 0, 0, 0, 0, 132]
-(int, int, int, int) parseRawHeartRateSensorData(List<int> data) {
+(int, int, int, int) parseRawPpgSensorData(List<int> data) {
   assert(data.length == 16);
   assert(data[0] == 0xa1);
   assert(data[1] == 0x02);
@@ -170,7 +210,7 @@ List<int> hexStringToCmdBytes(final String hexString) {
 /// Y is tangent to the ring
 /// X is vertical when worn on the finger
 /// e.g. [161, 3, 0, 12, 31, 6, 251, 3, 0, 0, 0, 0, 0, 0, 0, 211]
-(int, int, int,) parseRawAccelerometerSensorData(List<int> data) {
+(int, int, int) parseRawAccelerometerSensorData(List<int> data) {
   assert(data.length == 16);
   assert(data[0] == 0xa1);
   assert(data[1] == 0x03);
