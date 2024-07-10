@@ -234,13 +234,21 @@ class _HomePageState extends State<HomePage> {
           _rawY = rawY;
           _rawZ = rawZ;
 
-          // calculate absolute "scroll" position when rotated around the finger
-          // range -pi .. pi
-          _scroll = atan2(rawY, rawX);
-
           // how much acceleration other than gravity?
-          // range > 0, in g (squared, actually)
-          _impact = ((rawX * rawX + rawY * rawY + rawZ * rawZ)/(512*512) - 1.0).abs();
+          var netGforce = (sqrt(rawX * rawX + rawY * rawY + rawZ * rawZ)/512 - 1.0).abs();
+
+          // if this is just close to g, then the ring is at rest or perhaps gentle scrolling
+          if (netGforce < 0.1) {
+            // calculate absolute "scroll" position when rotated around the finger
+            // range -pi .. pi
+            _scroll = atan2(rawY, rawX);
+            _impact = 0.0;
+          }
+          else if (netGforce > 0.2) {
+            // if values are large, this is a flick or tap, don't update _scroll
+            // range > 0, in g
+            _impact = netGforce;
+          }
       }
       else if (data[1] == ring.RawSensorSubtype.spO2.code) {
         var (raw, a, b, c) = ring.parseRawSpO2SensorData(data);
